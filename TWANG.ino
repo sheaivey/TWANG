@@ -1,10 +1,8 @@
 // Required libs
-#define ARDUINO_SAMD_ZERO
+#define ARDUINO_SAMD_ZERO // This is a workaround to help FastLED identify pins on the M0
 #define BUFFER_LENGTH 1024
 
 #include "FastLED.h"
-#include "I2Cdev.h"
-#include "MPU6050.h"
 #include "Wire.h"
 #include "Tone.h"
 #include "iSin.h"
@@ -17,11 +15,6 @@
 #include "Lava.h"
 #include "Boss.h"
 #include "Conveyor.h"
-
-// MPU
-MPU6050 accelgyro;
-int16_t ax, ay, az;
-int16_t gx, gy, gz;
 
 // LED SETUP
 #define NUM_LEDS             146
@@ -50,14 +43,28 @@ iSin isin = iSin();
 // SCREENSAVER
 #define USE_SCREENSAVER
 
+// WHICH LED STRIP
+//#define USE_APA_STRIP
+#define USE_WS_STRIP
+
 // WHICH JOYSTICK TYPE
 //#define USE_BUTTON_JOYSTICK
 #define USE_ACCELEROMETER_JOYSTICK
 
+#ifdef USE_ACCELEROMETER_JOYSTICK
+  #include "I2Cdev.h"
+  #include "MPU6050.h"
+  MPU6050 accelgyro;
+  int16_t ax, ay, az;
+  int16_t gx, gy, gz;
+#endif
+
 // BUTTON JOYSTICK
-#define BUTTON_FORWARD       A1
-#define BUTTON_ATTACK        A2
-#define BUTTON_BACK          A3
+#ifdef USE_BUTTON_JOYSTICK
+  #define BUTTON_FORWARD       A1
+  #define BUTTON_ATTACK        A2
+  #define BUTTON_BACK          A3
+#endif
 
 // ACCELEROMETER JOYSTICK
 #define JOYSTICK_ORIENTATION 0     // 0, 1 or 2 to set the angle of the joystick
@@ -134,7 +141,12 @@ void setup() {
 #endif
 
     // Fast LED
+    #ifdef USE_APA_STRIP
     FastLED.addLeds<APA102, DATA_PIN, CLOCK_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
+    #endif
+    #ifdef USE_WS_STRIP
+    FastLED.addLeds<WS2812B, DATA_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
+    #endif
     FastLED.setBrightness(BRIGHTNESS);
     FastLED.setDither(1);
 
