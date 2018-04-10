@@ -1,9 +1,12 @@
 // Required libs
+#define ARDUINO_SAMD_ZERO
+#define BUFFER_LENGTH 1024
+
 #include "FastLED.h"
 #include "I2Cdev.h"
 #include "MPU6050.h"
 #include "Wire.h"
-#include "toneAC.h"
+#include "Tone.h"
 #include "iSin.h"
 #include "RunningMedian.h"
 
@@ -20,16 +23,21 @@ MPU6050 accelgyro;
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
 
-// LED setup
-#define NUM_LEDS             475
-#define DATA_PIN             3
-#define CLOCK_PIN            4
+// LED SETUP
+#define NUM_LEDS             146
+#define DATA_PIN             4 //SPI_DATA // 24 // 3
+#define CLOCK_PIN            6 //SPI_CLOCK // 23 // 4
 #define LED_COLOR_ORDER      BGR//GBR
 #define BRIGHTNESS           150
 #define DIRECTION            1     // 0 = right to left, 1 = left to right
 #define MIN_REDRAW_INTERVAL  16    // Min redraw interval (ms) 33 = 30fps / 16 = 63fps
 #define USE_GRAVITY          1     // 0/1 use gravity (LED strip going up wall)
-#define BEND_POINT           550   // 0/1000 point at which the LED strip goes up the wall
+#define BEND_POINT           146   // 0/1000 point at which the LED strip goes up the wall
+
+// SPEAKER
+#define SPEAKER_PIN A4
+#define SPEAKER_DURATION MIN_REDRAW_INTERVAL
+#define MAX_VOLUME           10
 
 // GAME
 long previousMillis = 0;           // Time of the last redraw
@@ -37,14 +45,27 @@ int levelNumber = 0;
 long lastInputTime = 0;
 #define TIMEOUT              30000
 #define LEVEL_COUNT          9
-#define MAX_VOLUME           10
 iSin isin = iSin();
 
-// JOYSTICK
-#define JOYSTICK_ORIENTATION 1     // 0, 1 or 2 to set the angle of the joystick
+// SCREENSAVER
+#define USE_SCREENSAVER
+
+// WHICH JOYSTICK TYPE
+//#define USE_BUTTON_JOYSTICK
+#define USE_ACCELEROMETER_JOYSTICK
+
+// BUTTON JOYSTICK
+#define BUTTON_FORWARD       A1
+#define BUTTON_ATTACK        A2
+#define BUTTON_BACK          A3
+
+// ACCELEROMETER JOYSTICK
+#define JOYSTICK_ORIENTATION 0     // 0, 1 or 2 to set the angle of the joystick
 #define JOYSTICK_DIRECTION   1     // 0/1 to flip joystick direction
+#define JOYSTICK_ANGLE_OFFSET  -5
+#define JOYSTICK_WOBBLE_OFFSET 0
 #define ATTACK_THRESHOLD     30000 // The threshold that triggers an attack
-#define JOYSTICK_DEADZONE    5     // Angle to ignore
+#define JOYSTICK_DEADZONE    10     // Angle to ignore
 int joystickTilt = 0;              // Stores the angle of the joystick
 int joystickWobble = 0;            // Stores the max amount of acceleration (wobble)
 
@@ -66,7 +87,6 @@ long killTime;
 int lives = 3;
 
 // POOLS
-int lifeLEDs[3] = {52, 50, 40};
 Enemy enemyPool[10] = {
     Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy(), Enemy()
 };
@@ -94,31 +114,39 @@ RunningMedian MPUAngleSamples = RunningMedian(5);
 RunningMedian MPUWobbleSamples = RunningMedian(5);
 
 void setup() {
-    Serial.begin(9600);
-    while (!Serial);
-    
-    // MPU
+    pinMode(13, OUTPUT);
+    digitalWrite(13, LOW);
+
+    // SPEAKER
+    // pinMode(SPEAKER_PIN, OUTPUT);
+
+#ifdef USE_BUTTON_JOYSTICK
+    // BUTTON JOYSTICK
+    pinMode(BUTTON_FORWARD, INPUT_PULLUP);
+    pinMode(BUTTON_ATTACK, INPUT_PULLUP);
+    pinMode(BUTTON_BACK, INPUT_PULLUP);
+#endif
+
+#ifdef USE_ACCELEROMETER_JOYSTICK
+    // MPU ACCELEROMETER JOYSTICK
     Wire.begin();
     accelgyro.initialize();
-    
+#endif
+
     // Fast LED
     FastLED.addLeds<APA102, DATA_PIN, CLOCK_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
     FastLED.setBrightness(BRIGHTNESS);
     FastLED.setDither(1);
-    
-    // Life LEDs
-    for(int i = 0; i<3; i++){
-        pinMode(lifeLEDs[i], OUTPUT);
-        digitalWrite(lifeLEDs[i], HIGH);
-    }
-    
+
+    digitalWrite(13, HIGH);
+    SerialUSB.println("TWANG!!");
     loadLevel();
 }
 
 void loop() {
     long mm = millis();
     int brightness = 0;
-    
+
     if(stage == "PLAY"){
         if(attacking){
             SFXattacking();
@@ -128,12 +156,12 @@ void loop() {
     }else if(stage == "DEAD"){
         SFXdead();
     }
-    
+
     if (mm - previousMillis >= MIN_REDRAW_INTERVAL) {
         getInput();
         long frameTimer = mm;
         previousMillis = mm;
-        
+
         if(abs(joystickTilt) > JOYSTICK_DEADZONE){
             lastInputTime = mm;
             if(stage == "SCREENSAVER"){
@@ -142,22 +170,24 @@ void loop() {
                 stage = "WIN";
             }
         }else{
+#ifdef USE_SCREENSAVER
             if(lastInputTime+TIMEOUT < mm){
                 stage = "SCREENSAVER";
             }
+#endif
         }
         if(stage == "SCREENSAVER"){
             screenSaverTick();
         }else if(stage == "PLAY"){
             // PLAYING
             if(attacking && attackMillis+ATTACK_DURATION < mm) attacking = 0;
-            
+
             // If not attacking, check if they should be
-            if(!attacking && joystickWobble > ATTACK_THRESHOLD){
+            if(!attacking && joystickWobble >= ATTACK_THRESHOLD){
                 attackMillis = mm;
                 attacking = 1;
             }
-            
+
             // If still not attacking, move!
             playerPosition += playerPositionModifier;
             if(!attacking){
@@ -172,13 +202,13 @@ void loop() {
                     return;
                 }
             }
-            
+
             if(inLava(playerPosition)){
                 die();
             }
-            
+
             // Ticks and draw calls
-            FastLED.clear();
+            clearLevelLeds();
             tickConveyors();
             tickSpawners();
             tickBoss();
@@ -189,13 +219,13 @@ void loop() {
             drawExit();
         }else if(stage == "DEAD"){
             // DEAD
-            FastLED.clear();
+            clearLevelLeds();
             if(!tickParticles()){
                 loadLevel();
             }
         }else if(stage == "WIN"){
             // LEVEL COMPLETE
-            FastLED.clear();
+            clearLevelLeds();
             if(stageStartTime+500 > mm){
                 int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS, 0), 0);
                 for(int i = NUM_LEDS; i>= n; i--){
@@ -211,12 +241,12 @@ void loop() {
                 }
                 SFXwin();
             }else if(stageStartTime+1200 > mm){
-                leds[0] = CRGB(0, 255, 0);
+                leds[2] = CRGB(0, 255, 0);
             }else{
                 nextLevel();
             }
         }else if(stage == "COMPLETE"){
-            FastLED.clear();
+            clearLevelLeds();
             SFXcomplete();
             if(stageStartTime+500 > mm){
                 int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS, 0), 0);
@@ -240,14 +270,18 @@ void loop() {
             }
         }else if(stage == "GAMEOVER"){
             // GAME OVER!
-            FastLED.clear();
+            clearLevelLeds();
             stageStartTime = 0;
         }
-        
-        Serial.print(millis()-mm);
-        Serial.print(" - ");
+
+        if(stage != "SCREENSAVER") {
+            drawLife();
+        }
+
+        // SerialUSB.print(millis()-mm);
+        // SerialUSB.print(" - ");
         FastLED.show();
-        Serial.println(millis()-mm);
+        // SerialUSB.println(millis()-mm);
     }
 }
 
@@ -401,6 +435,7 @@ void nextLevel(){
 
 void gameOver(){
     levelNumber = 0;
+    //lives = 3;
     loadLevel();
 }
 
@@ -465,7 +500,7 @@ void tickBoss(){
         // CHECK COLLISION
         if(getLED(playerPosition) > getLED(boss._pos - BOSS_WIDTH/2) && getLED(playerPosition) < getLED(boss._pos + BOSS_WIDTH)){
             die();
-            return; 
+            return;
         }
         // CHECK FOR ATTACK
         if(attacking){
@@ -483,6 +518,57 @@ void tickBoss(){
             }
         }
     }
+}
+
+void drawLife(){
+  switch(lives) {
+    case 3:
+      leds[0].nscale8(250);
+      leds[1].nscale8(250);
+      if(millis() % 1500 < 250) {
+        leds[0] = CRGB(255, 0, 0);
+        leds[1] = CRGB(255, 0, 0);
+      }
+      if(millis() % 1500 > 500 && millis() % 1500 < 750) {
+        leds[0] = CRGB(255, 0, 0);
+        leds[1] = CRGB(255, 0, 0);
+      }
+      break;
+    case 2:
+      leds[0].nscale8(250);
+      leds[1].nscale8(150);
+      if(millis() % 1000 < 200) {
+        leds[0] = CRGB(255, 0, 0);
+        leds[1] = CRGB(255, 0, 0);
+      }
+      if(millis() % 1000 > 400 && millis() % 1000 < 550) {
+        leds[0] = CRGB(255, 0, 0);
+        leds[1] = CRGB(255, 0, 0);
+      }
+
+      break;
+    case 1:
+      leds[0].nscale8(150);
+      leds[1].nscale8(150);
+      if(millis() % 750 < 100) {
+        leds[0] = CRGB(255, 0, 0);
+      }
+      if(millis() % 750 > 200 && millis() % 750 < 300) {
+        leds[0] = CRGB(255, 0, 0);
+      }
+      break;
+    default:
+      leds[0].nscale8(130);
+      leds[1].nscale8(130);
+      break;
+  }
+}
+
+void clearLevelLeds() {
+  //FastLED.clear();
+  for(int i = 2; i<NUM_LEDS; i++){
+    leds[i] = CRGB(0,0,0);
+  }
 }
 
 void drawPlayer(){
@@ -555,7 +641,7 @@ void tickConveyors(){
     int b, dir, n, i, ss, ee, led;
     long m = 10000+millis();
     playerPositionModifier = 0;
-    
+
     for(i = 0; i<conveyorCount; i++){
         if(conveyorPool[i]._alive){
             dir = conveyorPool[i]._dir;
@@ -568,7 +654,7 @@ void tickConveyors(){
                 b = (5-n)/2.0;
                 if(b > 0) leds[led] = CRGB(0, 0, b);
             }
-            
+
             if(playerPosition > conveyorPool[i]._startPoint && playerPosition < conveyorPool[i]._endPoint){
                 if(dir == -1){
                     playerPositionModifier = -(MAX_PLAYER_SPEED-4);
@@ -599,7 +685,7 @@ void drawAttack(){
 
 int getLED(int pos){
     // The world is 1000 pixels wide, this converts world units into an LED number
-    return constrain((int)map(pos, 0, 1000, 0, NUM_LEDS-1), 0, NUM_LEDS-1);
+    return constrain((int)map(pos, 0, 1000, 2, NUM_LEDS-1), 2, NUM_LEDS-1);
 }
 
 bool inLava(int pos){
@@ -616,10 +702,7 @@ bool inLava(int pos){
 }
 
 void updateLives(){
-    // Updates the life LEDs to show how many lives the player has left
-    for(int i = 0; i<3; i++){
-       digitalWrite(lifeLEDs[i], lives>i?HIGH:LOW);
-    }
+    drawLife();
 }
 
 
@@ -627,29 +710,35 @@ void updateLives(){
 // --------- SCREENSAVER -----------
 // ---------------------------------
 void screenSaverTick(){
-    int n, b, c, i;
+    static int h = 0, s = 255, v = 255;
+    int i, n;
     long mm = millis();
     int mode = (mm/20000)%2;
-    
+
+    // rainbow
+    if(h > 255) h = 0; else h += 1;
+    s = 255;
+    v = 255;
+
     for(i = 0; i<NUM_LEDS; i++){
         leds[i].nscale8(250);
     }
     if(mode == 0){
-        // Marching green <> orange
         n = (mm/250)%10;
-        b = 10+((sin(mm/500.00)+1)*20.00);
-        c = 20+((sin(mm/5000.00)+1)*33);
         for(i = 0; i<NUM_LEDS; i++){
             if(i%10 == n){
-                leds[i] = CHSV( c, 255, 150);
+                leds[i] = CHSV( h, s, v);
             }
         }
     }else if(mode == 1){
         // Random flashes
-        randomSeed(mm);
         for(i = 0; i<NUM_LEDS; i++){
-            if(random8(200) == 0){
-                leds[i] = CHSV( 25, 255, 100);
+            randomSeed(mm);
+            if(random8(200) == 0) {
+                h = random(0, 255);
+                s = random(0, 255);
+                v = random(10, 255);
+                leds[i] = CHSV( h, s, v);
             }
         }
     }
@@ -659,73 +748,74 @@ void screenSaverTick(){
 // ----------- JOYSTICK ------------
 // ---------------------------------
 void getInput(){
-    // This is responsible for the player movement speed and attacking. 
+    // This is responsible for the player movement speed and attacking.
     // You can replace it with anything you want that passes a -90>+90 value to joystickTilt
     // and any value to joystickWobble that is greater than ATTACK_THRESHOLD (defined at start)
     // For example you could use 3 momentery buttons:
-        // if(digitalRead(leftButtonPinNumber) == HIGH) joystickTilt = -90;
-        // if(digitalRead(rightButtonPinNumber) == HIGH) joystickTilt = 90;
-        // if(digitalRead(attackButtonPinNumber) == HIGH) joystickWobble = ATTACK_THRESHOLD;
-    
+#ifdef USE_BUTTON_JOYSTICK
+    joystickTilt = 0;
+    joystickWobble = 0;
+    if(digitalRead(A1) == LOW) joystickTilt = -90;
+    if(digitalRead(A2) == LOW) joystickTilt = 90;
+    if(digitalRead(A3) == LOW) joystickWobble = ATTACK_THRESHOLD;
+#endif
+#ifdef USE_ACCELEROMETER_JOYSTICK
     accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    int a = (JOYSTICK_ORIENTATION == 0?ax:(JOYSTICK_ORIENTATION == 1?ay:az))/166;
-    int g = (JOYSTICK_ORIENTATION == 0?gx:(JOYSTICK_ORIENTATION == 1?gy:gz));
+    int a = ((JOYSTICK_ORIENTATION == 0?ax:(JOYSTICK_ORIENTATION == 1?ay:az))/166) + JOYSTICK_ANGLE_OFFSET;
+    int g = ((JOYSTICK_ORIENTATION == 0?gx:(JOYSTICK_ORIENTATION == 1?gy:gz))) + JOYSTICK_WOBBLE_OFFSET;
     if(abs(a) < JOYSTICK_DEADZONE) a = 0;
     if(a > 0) a -= JOYSTICK_DEADZONE;
     if(a < 0) a += JOYSTICK_DEADZONE;
     MPUAngleSamples.add(a);
     MPUWobbleSamples.add(g);
-    
+
     joystickTilt = MPUAngleSamples.getMedian();
     if(JOYSTICK_DIRECTION == 1) {
         joystickTilt = 0-joystickTilt;
     }
     joystickWobble = abs(MPUWobbleSamples.getHighest());
+#endif
 }
 
 
 // ---------------------------------
 // -------------- SFX --------------
 // ---------------------------------
-void SFXtilt(int amount){ 
-    int f = map(abs(amount), 0, 90, 80, 900)+random8(100);
-    if(playerPositionModifier < 0) f -= 500;
-    if(playerPositionModifier > 0) f += 200;
-    toneAC(f, min(min(abs(amount)/9, 5), MAX_VOLUME));
-    
+void SFXtilt(int amount){
+    int freq = map(abs(amount), 0, 90, 80, 900)+random8(100);
+    if(playerPositionModifier < 0) freq -= 500;
+    if(playerPositionModifier > 0) freq += 200;
+    //toneAC(f, min(min(abs(amount)/9, 5), MAX_VOLUME));
+    //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
 }
 void SFXattacking(){
     int freq = map(sin(millis()/2.0)*1000.0, -1000, 1000, 500, 600);
     if(random8(5)== 0){
       freq *= 3;
     }
-    toneAC(freq, MAX_VOLUME);
+    //toneAC(freq, MAX_VOLUME);
+    //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
 }
 void SFXdead(){
     int freq = max(1000 - (millis()-killTime), 10);
     freq += random8(200);
     int vol = max(10 - (millis()-killTime)/200, 0);
-    toneAC(freq, MAX_VOLUME);
+    //toneAC(freq, MAX_VOLUME);
+    //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
 }
 void SFXkill(){
-    toneAC(2000, MAX_VOLUME, 1000, true);
+    //toneAC(2000, MAX_VOLUME, 1000, true);
+    //tone(SPEAKER_PIN, 2000, 1000);
 }
 void SFXwin(){
     int freq = (millis()-stageStartTime)/3.0;
     freq += map(sin(millis()/20.0)*1000.0, -1000, 1000, 0, 20);
     int vol = 10;//max(10 - (millis()-stageStartTime)/200, 0);
-    toneAC(freq, MAX_VOLUME);
+    //toneAC(freq, MAX_VOLUME);
+    //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
 }
 
 void SFXcomplete(){
-    noToneAC();
+    //noToneAC();
+    noTone(SPEAKER_PIN);
 }
-
-
-
-
-
-
-
-
-

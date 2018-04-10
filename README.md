@@ -1,6 +1,13 @@
 # TWANG
 A Arduino-based, 1D, LED loving, dungeon crawler. inspired by Line Wobbler by Robin B
 
+## Modifications
+* Modified to work on the Arduino M0/SAMD21G18A
+* Enable the screensaver by uncommenting `USE_SCREENSAVER`
+* Easy joystick type selection by uncommenting `USE_BUTTON_JOYSTICK` or `USE_ACCELEROMETER_JOYSTICK`
+* Life indicator is now the first two LEDs of the strip. Doing this allowed for a opaque heart(❤️) with each led representing half of the heart. I wound up placing the heart on the top of the joystick handle.
+* Audio is currently not working. (attempting to convert to the native Arduino Tone library.)
+
 ## Video playlist
 A playlist that shows the development of TWANG and the game in both a desktop and house-sized form can be found here: https://www.youtube.com/watch?v=9yf_VINmbTE&list=PL1_Z89_x_Dff-XhOxlx6sQ38wJqe1X2M0
 
@@ -8,7 +15,6 @@ A playlist that shows the development of TWANG and the game in both a desktop an
 * FastLED: http://fastled.io/
 * I2Cdev
 * MPU6050: https://github.com/jrowberg/i2cdevlib/tree/master/Arduino/MPU6050
-* ToneAC: http://forum.arduino.cc/index.php?topic=142097.0
 * RunningMedian: http://playground.arduino.cc/Main/RunningMedian
 
 ## Hardware used:
