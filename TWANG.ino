@@ -44,8 +44,8 @@ iSin isin = iSin();
 #define USE_SCREENSAVER
 
 // WHICH LED STRIP
-//#define USE_APA_STRIP
-#define USE_WS_STRIP
+#define USE_APA_STRIP
+//#define USE_WS_STRIP
 
 // WHICH JOYSTICK TYPE
 //#define USE_BUTTON_JOYSTICK
@@ -92,6 +92,9 @@ int playerPositionModifier;        // +/- adjustment to player position
 bool playerAlive;
 long killTime;
 int lives = 3;
+
+// DEMO SIMULATION
+bool demo_simulation = false;
 
 // POOLS
 Enemy enemyPool[10] = {
@@ -171,12 +174,23 @@ void loop() {
 
     if (mm - previousMillis >= MIN_REDRAW_INTERVAL) {
         getInput();
+        if(demo_simulation && abs(joystickTilt) > JOYSTICK_DEADZONE){
+            // exit simulation on joystick move
+            demo_simulation = false;
+            levelNumber = -1;
+            stageStartTime = mm;
+            stage = "WIN";
+        }
+        if(demo_simulation) {
+            getSimulationInput();
+        }
+
         long frameTimer = mm;
         previousMillis = mm;
 
         if(abs(joystickTilt) > JOYSTICK_DEADZONE){
             lastInputTime = mm;
-            if(stage == "SCREENSAVER"){
+            if(stage == "SCREENSAVER") {
                 levelNumber = -1;
                 stageStartTime = mm;
                 stage = "WIN";
@@ -458,6 +472,11 @@ void die(){
     if(lives == 0){
         levelNumber = 0;
         lives = 3;
+        if(demo_simulation) {
+            // exit simulation on death
+            stage = "SCREENSAVER";
+            return;
+        }
     }
     for(int p = 0; p < particleCount; p++){
         particlePool[p].Spawn(playerPosition);
@@ -700,17 +719,40 @@ int getLED(int pos){
     return constrain((int)map(pos, 0, 1000, 2, NUM_LEDS-1), 2, NUM_LEDS-1);
 }
 
-bool inLava(int pos){
+int isLava(int pos){
     // Returns if the player is in active lava
     int i;
     Lava LP;
     for(i = 0; i<lavaCount; i++){
         LP = lavaPool[i];
-        if(LP.Alive() && LP._state == "ON"){
-            if(LP._left < pos && LP._right > pos) return true;
+        if(LP.Alive()){
+            if(LP._left < pos && LP._right > pos) return LP._state == "ON" ? 1 : -1;
         }
     }
-    return false;
+    return 0;
+}
+
+bool inLava(int pos){
+    // Returns if the player is in active lava
+    return isLava(pos) == 1;
+}
+
+
+int inConveyor(int pos) {
+    int dir, i;
+    for(i = 0; i<conveyorCount; i++){
+        if(conveyorPool[i]._alive){
+            dir = conveyorPool[i]._dir;
+            if(playerPosition > conveyorPool[i]._startPoint && playerPosition < conveyorPool[i]._endPoint){
+                if(dir == -1){
+                    return -1;
+                }else{
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
 }
 
 void updateLives(){
@@ -727,33 +769,20 @@ void screenSaverTick(){
     long mm = millis();
     int mode = (mm/20000)%2;
 
-    // rainbow
-    if(h > 255) h = 0; else h += 1;
-    s = 255;
-    v = 255;
+    if(mode == 0) {
+      fadeToBlackBy( leds, NUM_LEDS, 20);
+      byte dothue = 0;
+      for( int i = 0; i < 8; i++) {
+        leds[beatsin16(i+7,0,NUM_LEDS)] |= CHSV(dothue, 200, 255);
+        dothue += 32;
+      }
+    }
+    else if(mode == 1) {
+      demo_simulation = true;
+      levelNumber = 0;
+      loadLevel();
+    }
 
-    for(i = 0; i<NUM_LEDS; i++){
-        leds[i].nscale8(250);
-    }
-    if(mode == 0){
-        n = (mm/250)%10;
-        for(i = 0; i<NUM_LEDS; i++){
-            if(i%10 == n){
-                leds[i] = CHSV( h, s, v);
-            }
-        }
-    }else if(mode == 1){
-        // Random flashes
-        for(i = 0; i<NUM_LEDS; i++){
-            randomSeed(mm);
-            if(random8(200) == 0) {
-                h = random(0, 255);
-                s = random(0, 255);
-                v = random(10, 255);
-                leds[i] = CHSV( h, s, v);
-            }
-        }
-    }
 }
 
 // ---------------------------------
@@ -767,9 +796,9 @@ void getInput(){
 #ifdef USE_BUTTON_JOYSTICK
     joystickTilt = 0;
     joystickWobble = 0;
-    if(digitalRead(A1) == LOW) joystickTilt = -90;
-    if(digitalRead(A2) == LOW) joystickTilt = 90;
-    if(digitalRead(A3) == LOW) joystickWobble = ATTACK_THRESHOLD;
+    if(digitalRead(BUTTON_BACK) == LOW) joystickTilt = -90;
+    if(digitalRead(BUTTON_FORWARD) == LOW) joystickTilt = 90;
+    if(digitalRead(BUTTON_ATTACK) == LOW) joystickWobble = ATTACK_THRESHOLD;
 #endif
 #ifdef USE_ACCELEROMETER_JOYSTICK
     accelgyro.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
@@ -787,6 +816,68 @@ void getInput(){
     }
     joystickWobble = abs(MPUWobbleSamples.getHighest());
 #endif
+}
+
+void getSimulationInput() {
+    static int passingLava = 0;
+    static int activeLava = 0;
+    joystickTilt = 0;
+    joystickWobble = 0;
+
+    joystickTilt = random(10, 40); // forward
+
+    int hotLava = isLava(playerPosition+10);
+    if(hotLava != 0) {
+        joystickTilt = 0;
+        // near lava
+        if(hotLava == 1) {
+            activeLava = 1;
+        }
+        else {
+            // lava is inactive now
+            if(activeLava == 1) {
+                // changed from active RUN THROUGH!
+                joystickTilt = 90;
+            }
+        }
+    }
+    else {
+        // no lava near
+        activeLava = 0;
+    }
+
+    if(inConveyor(playerPosition) != 0) {
+        joystickTilt = 90;
+    }
+
+    // check if enemy is near by to attack
+    for(int i = 0; i<enemyCount; i++){
+        if(enemyPool[i].Alive()){
+            // Hit player?
+            if(
+                (enemyPool[i].playerSide == 1 && enemyPool[i]._pos <= playerPosition+(ATTACK_WIDTH/2-1)) ||
+                (enemyPool[i].playerSide == -1 && enemyPool[i]._pos >= playerPosition-(ATTACK_WIDTH/2-1))
+            ) {
+                joystickWobble = ATTACK_THRESHOLD; // attack
+            }
+        }
+    }
+
+
+    // check boss
+    // if(boss.Alive()){
+    //     // CHECK COLLISION
+    //     if(getLED(playerPosition) > getLED(boss._pos - BOSS_WIDTH/2) && getLED(playerPosition) < getLED(boss._pos + BOSS_WIDTH)){
+    //         die();
+    //         return;
+    //     }
+    //     if(
+    //       (getLED(playerPosition+(ATTACK_WIDTH/2)) >= getLED(boss._pos - BOSS_WIDTH/2) && getLED(playerPosition+(ATTACK_WIDTH/2)) <= getLED(boss._pos + BOSS_WIDTH/2)) ||
+    //       (getLED(playerPosition-(ATTACK_WIDTH/2)) <= getLED(boss._pos + BOSS_WIDTH/2) && getLED(playerPosition-(ATTACK_WIDTH/2)) >= getLED(boss._pos - BOSS_WIDTH/2))
+    //     ){
+    //
+    //     }
+    // }
 }
 
 
@@ -829,5 +920,5 @@ void SFXwin(){
 
 void SFXcomplete(){
     //noToneAC();
-    noTone(SPEAKER_PIN);
+    //noTone(SPEAKER_PIN);
 }
