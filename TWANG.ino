@@ -181,7 +181,7 @@ void loop() {
             stageStartTime = mm;
             stage = "WIN";
         }
-        if(demo_simulation) {
+        else if(demo_simulation == true) {
             getSimulationInput();
         }
 
@@ -197,8 +197,9 @@ void loop() {
             }
         }else{
 #ifdef USE_SCREENSAVER
-            if(lastInputTime+TIMEOUT < mm){
+            if(lastInputTime+TIMEOUT < mm && stage != "SCREENSAVER"){
                 stage = "SCREENSAVER";
+                stageStartTime = mm;
             }
 #endif
         }
@@ -253,14 +254,14 @@ void loop() {
             // LEVEL COMPLETE
             clearLevelLeds();
             if(stageStartTime+500 > mm){
-                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS, 0), 0);
-                for(int i = NUM_LEDS; i>= n; i--){
+                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS-1, 0), 0);
+                for(int i = NUM_LEDS-1; i>= n; i--){
                     brightness = 255;
                     leds[i] = CRGB(0, brightness, 0);
                 }
                 SFXwin();
             }else if(stageStartTime+1000 > mm){
-                int n = max(map(((mm-stageStartTime)), 500, 1000, NUM_LEDS, 0), 0);
+                int n = max(map(((mm-stageStartTime)), 500, 1000, NUM_LEDS-1, 0), 0);
                 for(int i = 0; i< n; i++){
                     brightness = 255;
                     leds[i] = CRGB(0, brightness, 0);
@@ -275,18 +276,18 @@ void loop() {
             clearLevelLeds();
             SFXcomplete();
             if(stageStartTime+500 > mm){
-                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS, 0), 0);
-                for(int i = NUM_LEDS; i>= n; i--){
+                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS-1, 0), 0);
+                for(int i = NUM_LEDS-1; i>= n; i--){
                     brightness = (sin(((i*10)+mm)/500.0)+1)*255;
                     leds[i].setHSV(brightness, 255, 50);
                 }
             }else if(stageStartTime+5000 > mm){
-                for(int i = NUM_LEDS; i>= 0; i--){
+                for(int i = NUM_LEDS-1; i>= 0; i--){
                     brightness = (sin(((i*10)+mm)/500.0)+1)*255;
                     leds[i].setHSV(brightness, 255, 50);
                 }
             }else if(stageStartTime+5500 > mm){
-                int n = max(map(((mm-stageStartTime)), 5000, 5500, NUM_LEDS, 0), 0);
+                int n = max(map(((mm-stageStartTime)), 5000, 5500, NUM_LEDS-1, 0), 0);
                 for(int i = 0; i< n; i++){
                     brightness = (sin(((i*10)+mm)/500.0)+1)*255;
                     leds[i].setHSV(brightness, 255, 50);
@@ -474,7 +475,9 @@ void die(){
         lives = 3;
         if(demo_simulation) {
             // exit simulation on death
+            demo_simulation = false;
             stage = "SCREENSAVER";
+            stageStartTime = millis();
             return;
         }
     }
@@ -597,7 +600,7 @@ void drawLife(){
 
 void clearLevelLeds() {
   //FastLED.clear();
-  for(int i = 2; i<NUM_LEDS; i++){
+  for(int i = 2; i < NUM_LEDS; i++){
     leds[i] = CRGB(0,0,0);
   }
 }
@@ -764,25 +767,21 @@ void updateLives(){
 // --------- SCREENSAVER -----------
 // ---------------------------------
 void screenSaverTick(){
-    static int h = 0, s = 255, v = 255;
     int i, n;
-    long mm = millis();
-    int mode = (mm/20000)%2;
-
-    if(mode == 0) {
-      fadeToBlackBy( leds, NUM_LEDS, 20);
+    if(stageStartTime+10000 > millis()) {
+      demo_simulation = false;
+      fadeToBlackBy( leds, NUM_LEDS-1, 20);
       byte dothue = 0;
       for( int i = 0; i < 8; i++) {
-        leds[beatsin16(i+7,0,NUM_LEDS)] |= CHSV(dothue, 200, 255);
+        leds[beatsin16(i+7,0,NUM_LEDS-1)] |= CHSV(dothue, 200, 255);
         dothue += 32;
       }
     }
-    else if(mode == 1) {
+    else {
       demo_simulation = true;
       levelNumber = 0;
       loadLevel();
     }
-
 }
 
 // ---------------------------------
@@ -858,7 +857,9 @@ void getSimulationInput() {
                 (enemyPool[i].playerSide == 1 && enemyPool[i]._pos <= playerPosition+(ATTACK_WIDTH/2-1)) ||
                 (enemyPool[i].playerSide == -1 && enemyPool[i]._pos >= playerPosition-(ATTACK_WIDTH/2-1))
             ) {
-                joystickWobble = ATTACK_THRESHOLD; // attack
+                if(random(1, 10) < 5) { //
+                    joystickWobble = ATTACK_THRESHOLD; // attack
+                }
             }
         }
     }
