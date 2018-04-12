@@ -273,6 +273,7 @@ void loop() {
                 nextLevel();
             }
         }else if(stage == "COMPLETE"){
+            demo_simulation = false;
             clearLevelLeds();
             SFXcomplete();
             if(stageStartTime+500 > mm){
@@ -322,11 +323,11 @@ void loadLevel(){
     playerPosition = 0;
     playerAlive = 1;
     switch(levelNumber){
-case 0:
+        case 0:
             // Left or right?
             playerPosition = 200;
             spawnEnemy(1, 0, 0, 0);
-break;
+            break;
         case 1:
             // Slow moving enemy
             spawnEnemy(900, 0, 1, 0);
