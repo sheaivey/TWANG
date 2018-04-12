@@ -322,11 +322,11 @@ void loadLevel(){
     playerPosition = 0;
     playerAlive = 1;
     switch(levelNumber){
-        case 0:
+case 0:
             // Left or right?
             playerPosition = 200;
             spawnEnemy(1, 0, 0, 0);
-            break;
+break;
         case 1:
             // Slow moving enemy
             spawnEnemy(900, 0, 1, 0);
@@ -864,21 +864,24 @@ void getSimulationInput() {
         }
     }
 
-
     // check boss
-    // if(boss.Alive()){
-    //     // CHECK COLLISION
-    //     if(getLED(playerPosition) > getLED(boss._pos - BOSS_WIDTH/2) && getLED(playerPosition) < getLED(boss._pos + BOSS_WIDTH)){
-    //         die();
-    //         return;
-    //     }
-    //     if(
-    //       (getLED(playerPosition+(ATTACK_WIDTH/2)) >= getLED(boss._pos - BOSS_WIDTH/2) && getLED(playerPosition+(ATTACK_WIDTH/2)) <= getLED(boss._pos + BOSS_WIDTH/2)) ||
-    //       (getLED(playerPosition-(ATTACK_WIDTH/2)) <= getLED(boss._pos + BOSS_WIDTH/2) && getLED(playerPosition-(ATTACK_WIDTH/2)) >= getLED(boss._pos - BOSS_WIDTH/2))
-    //     ){
-    //
-    //     }
-    // }
+    if(boss.Alive()){
+        if(getLED(playerPosition) < getLED(boss._pos)) {
+            // move frward twords boss
+            joystickTilt = 45;
+        } else {
+            // move backward twords boss
+            joystickTilt = -45;
+        }
+        if(
+          (getLED(playerPosition+(ATTACK_WIDTH/2)) >= getLED(boss._pos - BOSS_WIDTH/2) && getLED(playerPosition+(ATTACK_WIDTH/2)) <= getLED(boss._pos + BOSS_WIDTH/2)) ||
+          (getLED(playerPosition-(ATTACK_WIDTH/2)) <= getLED(boss._pos + BOSS_WIDTH/2) && getLED(playerPosition-(ATTACK_WIDTH/2)) >= getLED(boss._pos - BOSS_WIDTH/2))
+        ){
+            if(random(1, 10) < 7) {
+                joystickWobble = ATTACK_THRESHOLD; // attack boss
+            }
+        }
+    }
 }
 
 
