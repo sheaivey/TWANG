@@ -1,0 +1,15 @@
+{
+  "name": "html-minify-c",
+  "version": "1.0.0",
+  "description": "Convert JS to minified. https://closure-compiler.appspot.com/home",
+  "main": "make.js",
+  "dependencies": {
+    "html-minifier": "^3.5.14"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "make": "node make.js"
+  },
+  "author": "Shea Ivey <me@sheaivey.com> (http://sheaivey.com)",
+  "license": "MIT"
+}

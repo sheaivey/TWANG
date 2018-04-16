@@ -1,10 +1,13 @@
-# TWANG
+# PHONE TWANG
 A Arduino-based, 1D, LED loving, dungeon crawler. inspired by Line Wobbler by Robin B
 
 ## Modifications
-* Modified to work on the Arduino M0/SAMD21G18A
+* *** **WORK IN PROGRESS** ***
+* Modified to work on the ESP32
+* `USE_WIFI_JOYSTICK` enables webserver and web sockets.
+* Join the WiFi network `TWANG`, password `twangtwang` open browser `http://10.0.0.1`.
+* Use phones accelerometer or computer `arrow keys` and `spacebar`. Enjoy!
 * Enable the screensaver by uncommenting `USE_SCREENSAVER`
-* Easy joystick type selection by uncommenting `USE_BUTTON_JOYSTICK` or `USE_ACCELEROMETER_JOYSTICK`
 * Life indicator is now the first two LEDs of the strip. Doing this allowed for a opaque heart(❤️) with each led representing half of the heart. I wound up placing the heart on the top of the joystick handle.
 * Audio is currently not working. (attempting to convert to the native Arduino Tone library.)
 

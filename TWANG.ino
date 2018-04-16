@@ -1,12 +1,13 @@
 // Required libs
-#define ARDUINO_SAMD_ZERO // This is a workaround to help FastLED identify pins on the M0
+//#define ARDUINO_SAMD_ZERO // This is a workaround to help FastLED identify pins on the M0
+#define ESP32
+
 #define BUFFER_LENGTH 1024
 
 #include "FastLED.h"
+
 #include "Wire.h"
-#include "Tone.h"
-#include "iSin.h"
-#include "RunningMedian.h"
+//#include "Tone.h"
 
 // Included libs
 #include "Enemy.h"
@@ -17,10 +18,10 @@
 #include "Conveyor.h"
 
 // LED SETUP
-#define NUM_LEDS             146
-#define DATA_PIN             4 //SPI_DATA // 24 // 3
+#define NUM_LEDS             72
+#define DATA_PIN             12 //SPI_DATA // 24 // 3
 #define CLOCK_PIN            6 //SPI_CLOCK // 23 // 4
-#define LED_COLOR_ORDER      BGR//GBR
+#define LED_COLOR_ORDER      GRB//GBR
 #define BRIGHTNESS           150
 #define DIRECTION            1     // 0 = right to left, 1 = left to right
 #define MIN_REDRAW_INTERVAL  16    // Min redraw interval (ms) 33 = 30fps / 16 = 63fps
@@ -28,6 +29,7 @@
 #define BEND_POINT           146   // 0/1000 point at which the LED strip goes up the wall
 
 // SPEAKER
+//#define USE_SPEAKER
 #define SPEAKER_PIN A4
 #define SPEAKER_DURATION MIN_REDRAW_INTERVAL
 #define MAX_VOLUME           10
@@ -38,25 +40,33 @@ int levelNumber = 0;
 long lastInputTime = 0;
 #define TIMEOUT              30000
 #define LEVEL_COUNT          9
-iSin isin = iSin();
+
 
 // SCREENSAVER
 #define USE_SCREENSAVER
 
 // WHICH LED STRIP
-#define USE_APA_STRIP
-//#define USE_WS_STRIP
+//#define USE_APA_STRIP
+#define USE_WS_STRIP
+
 
 // WHICH JOYSTICK TYPE
 //#define USE_BUTTON_JOYSTICK
-#define USE_ACCELEROMETER_JOYSTICK
+//#define USE_ACCELEROMETER_JOYSTICK
+#define USE_WIFI_JOYSTICK
 
 #ifdef USE_ACCELEROMETER_JOYSTICK
   #include "I2Cdev.h"
   #include "MPU6050.h"
+
+  #include "iSin.h"
+  #include "RunningMedian.h"
+  iSin isin = iSin();
   MPU6050 accelgyro;
   int16_t ax, ay, az;
   int16_t gx, gy, gz;
+  RunningMedian MPUAngleSamples = RunningMedian(5);
+  RunningMedian MPUWobbleSamples = RunningMedian(5);
 #endif
 
 // BUTTON JOYSTICK
@@ -64,6 +74,27 @@ iSin isin = iSin();
   #define BUTTON_FORWARD       A1
   #define BUTTON_ATTACK        A2
   #define BUTTON_BACK          A3
+#endif
+
+#ifdef USE_WIFI_JOYSTICK
+  #include <WiFi.h>
+  #include <FS.h>
+  #include <AsyncTCP.h>
+  #include <ESPAsyncWebServer.h>
+  AsyncWebServer serverHTTP(80);
+  WiFiServer serverSocket(81);
+
+  #include <WebSocketServer.h>
+  WebSocketServer webSocketServer;
+
+  const char* ssid     = "TWANG";
+  const char* password = "twangtwang";
+
+  WiFiClient client;
+  bool isConnected = false;
+
+  // web pages
+  #include "html/dist/PROGMEM.h"
 #endif
 
 // ACCELEROMETER JOYSTICK
@@ -120,13 +151,11 @@ int const conveyorCount = 2;
 Boss boss = Boss();
 
 CRGB leds[NUM_LEDS];
-RunningMedian MPUAngleSamples = RunningMedian(5);
-RunningMedian MPUWobbleSamples = RunningMedian(5);
 
 void setup() {
-    pinMode(13, OUTPUT);
-    digitalWrite(13, LOW);
-
+    Serial.begin(115200);
+    delay(1000);
+    Serial.println("TWANG!!");
     // SPEAKER
     // pinMode(SPEAKER_PIN, OUTPUT);
 
@@ -143,6 +172,32 @@ void setup() {
     accelgyro.initialize();
 #endif
 
+#ifdef USE_WIFI_JOYSTICK
+    WiFi.mode(WIFI_MODE_AP);
+    WiFi.softAP(ssid, password);
+    delay(500);
+    Serial.println("Set softAPConfig");
+    IPAddress Ip(10, 0, 0, 1);
+    IPAddress NMask(255, 255, 0, 0);
+    WiFi.softAPConfig(Ip, Ip, NMask);
+
+    Serial.println("");
+    Serial.println("AccessPoint established.");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+
+
+    serverHTTP.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "text/html", INDEX);
+    });
+    serverHTTP.onNotFound([](AsyncWebServerRequest *request){
+        request->send(404, "text/plain", "404 Bummer! :(");
+    });
+    serverHTTP.begin();
+    serverSocket.begin();
+#endif
+
+
     // Fast LED
     #ifdef USE_APA_STRIP
     FastLED.addLeds<APA102, DATA_PIN, CLOCK_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
@@ -154,11 +209,15 @@ void setup() {
     FastLED.setDither(1);
 
     digitalWrite(13, HIGH);
-    SerialUSB.println("TWANG!!");
     loadLevel();
 }
 
 void loop() {
+
+#ifdef USE_WIFI_JOYSTICK
+    checkSocketServer();
+#endif
+
     long mm = millis();
     int brightness = 0;
 
@@ -254,14 +313,14 @@ void loop() {
             // LEVEL COMPLETE
             clearLevelLeds();
             if(stageStartTime+500 > mm){
-                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS-1, 0), 0);
+                int n = _max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS-1, 0), 0);
                 for(int i = NUM_LEDS-1; i>= n; i--){
                     brightness = 255;
                     leds[i] = CRGB(0, brightness, 0);
                 }
                 SFXwin();
             }else if(stageStartTime+1000 > mm){
-                int n = max(map(((mm-stageStartTime)), 500, 1000, NUM_LEDS-1, 0), 0);
+                int n = _max(map(((mm-stageStartTime)), 500, 1000, NUM_LEDS-1, 0), 0);
                 for(int i = 0; i< n; i++){
                     brightness = 255;
                     leds[i] = CRGB(0, brightness, 0);
@@ -277,21 +336,21 @@ void loop() {
             clearLevelLeds();
             SFXcomplete();
             if(stageStartTime+500 > mm){
-                int n = max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS-1, 0), 0);
+                int n = _max(map(((mm-stageStartTime)), 0, 500, NUM_LEDS-1, 0), 0);
                 for(int i = NUM_LEDS-1; i>= n; i--){
                     brightness = (sin(((i*10)+mm)/500.0)+1)*255;
-                    leds[i].setHSV(brightness, 255, 50);
+                    leds[i].setHSV(brightness, 255, 255);
                 }
             }else if(stageStartTime+5000 > mm){
                 for(int i = NUM_LEDS-1; i>= 0; i--){
                     brightness = (sin(((i*10)+mm)/500.0)+1)*255;
-                    leds[i].setHSV(brightness, 255, 50);
+                    leds[i].setHSV(brightness, 255, 255);
                 }
             }else if(stageStartTime+5500 > mm){
-                int n = max(map(((mm-stageStartTime)), 5000, 5500, NUM_LEDS-1, 0), 0);
+                int n = _max(map(((mm-stageStartTime)), 5000, 5500, NUM_LEDS-1, 0), 0);
                 for(int i = 0; i< n; i++){
                     brightness = (sin(((i*10)+mm)/500.0)+1)*255;
-                    leds[i].setHSV(brightness, 255, 50);
+                    leds[i].setHSV(brightness, 255, 255);
                 }
             }else{
                 nextLevel();
@@ -306,10 +365,7 @@ void loop() {
             drawLife();
         }
 
-        // SerialUSB.print(millis()-mm);
-        // SerialUSB.print(" - ");
         FastLED.show();
-        // SerialUSB.println(millis()-mm);
     }
 }
 
@@ -452,6 +508,9 @@ void levelComplete(){
     stage = "WIN";
     if(levelNumber == LEVEL_COUNT) stage = "COMPLETE";
     lives = 3;
+    levelNumber++;
+    updateSocketClients();
+    levelNumber--;
     updateLives();
 }
 
@@ -471,6 +530,7 @@ void die(){
     playerAlive = 0;
     if(levelNumber > 0) lives --;
     updateLives();
+    updateSocketClients();
     if(lives == 0){
         levelNumber = 0;
         lives = 3;
@@ -629,7 +689,7 @@ void tickSpawners(){
 }
 
 void tickLava(){
-    int A, B, p, i, brightness, flicker;
+    int A, B, p, i, flicker;
     long mm = millis();
     Lava LP;
     for(i = 0; i<lavaCount; i++){
@@ -644,7 +704,7 @@ void tickLava(){
                     LP._lastOn = mm;
                 }
                 for(p = A; p<= B; p++){
-                    leds[p] = CRGB(3+flicker, (3+flicker)/1.5, 0);
+                    leds[p] = CRGB(8+flicker, (3+flicker)/1.5, 0);
                 }
             }else if(LP._state == "ON"){
                 if(LP._lastOn + LP._ontime < mm){
@@ -687,7 +747,7 @@ void tickConveyors(){
                 n = (-led + (m/100)) % 5;
                 if(dir == -1) n = (led + (m/100)) % 5;
                 b = (5-n)/2.0;
-                if(b > 0) leds[led] = CRGB(0, 0, b);
+                if(b > 0) leds[led] = CRGB(0, 0, b*2);
             }
 
             if(playerPosition > conveyorPool[i]._startPoint && playerPosition < conveyorPool[i]._endPoint){
@@ -771,10 +831,10 @@ void screenSaverTick(){
     int i, n;
     if(stageStartTime+10000 > millis()) {
       demo_simulation = false;
-      fadeToBlackBy( leds, NUM_LEDS-1, 20);
+      fadeToBlackBy( leds, NUM_LEDS, 20);
       byte dothue = 0;
       for( int i = 0; i < 8; i++) {
-        leds[beatsin16(i+7,0,NUM_LEDS-1)] |= CHSV(dothue, 200, 255);
+        leds[beatsin16(i+7,0,NUM_LEDS-1)] |= CHSV(dothue, 255, 255);
         dothue += 32;
       }
     }
@@ -789,13 +849,15 @@ void screenSaverTick(){
 // ----------- JOYSTICK ------------
 // ---------------------------------
 void getInput(){
+    if(demo_simulation || !isConnected) {
+        joystickTilt = 0;
+        joystickWobble = 0;
+    }
     // This is responsible for the player movement speed and attacking.
     // You can replace it with anything you want that passes a -90>+90 value to joystickTilt
     // and any value to joystickWobble that is greater than ATTACK_THRESHOLD (defined at start)
     // For example you could use 3 momentery buttons:
 #ifdef USE_BUTTON_JOYSTICK
-    joystickTilt = 0;
-    joystickWobble = 0;
     if(digitalRead(BUTTON_BACK) == LOW) joystickTilt = -90;
     if(digitalRead(BUTTON_FORWARD) == LOW) joystickTilt = 90;
     if(digitalRead(BUTTON_ATTACK) == LOW) joystickWobble = ATTACK_THRESHOLD;
@@ -858,7 +920,7 @@ void getSimulationInput() {
                 (enemyPool[i].playerSide == 1 && enemyPool[i]._pos <= playerPosition+(ATTACK_WIDTH/2-1)) ||
                 (enemyPool[i].playerSide == -1 && enemyPool[i]._pos >= playerPosition-(ATTACK_WIDTH/2-1))
             ) {
-                if(random(1, 10) < 5) { //
+                if(random(1, 10) < 7) {
                     joystickWobble = ATTACK_THRESHOLD; // attack
                 }
             }
@@ -890,40 +952,87 @@ void getSimulationInput() {
 // -------------- SFX --------------
 // ---------------------------------
 void SFXtilt(int amount){
+#ifdef USE_SPEAKER
     int freq = map(abs(amount), 0, 90, 80, 900)+random8(100);
     if(playerPositionModifier < 0) freq -= 500;
     if(playerPositionModifier > 0) freq += 200;
     //toneAC(f, min(min(abs(amount)/9, 5), MAX_VOLUME));
     //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
+#endif
 }
 void SFXattacking(){
+#ifdef USE_SPEAKER
     int freq = map(sin(millis()/2.0)*1000.0, -1000, 1000, 500, 600);
     if(random8(5)== 0){
       freq *= 3;
     }
     //toneAC(freq, MAX_VOLUME);
     //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
+#endif
 }
 void SFXdead(){
-    int freq = max(1000 - (millis()-killTime), 10);
+#ifdef USE_SPEAKER
+    int freq = _max(1000 - (millis()-killTime), 10);
     freq += random8(200);
-    int vol = max(10 - (millis()-killTime)/200, 0);
+    int vol = _max(10 - (millis()-killTime)/200, 0);
     //toneAC(freq, MAX_VOLUME);
     //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
+#endif
 }
 void SFXkill(){
+#ifdef USE_SPEAKER
     //toneAC(2000, MAX_VOLUME, 1000, true);
     //tone(SPEAKER_PIN, 2000, 1000);
+#endif
 }
 void SFXwin(){
+#ifdef USE_SPEAKER
     int freq = (millis()-stageStartTime)/3.0;
     freq += map(sin(millis()/20.0)*1000.0, -1000, 1000, 0, 20);
-    int vol = 10;//max(10 - (millis()-stageStartTime)/200, 0);
+    int vol = 10;//_max(10 - (millis()-stageStartTime)/200, 0);
     //toneAC(freq, MAX_VOLUME);
     //tone(SPEAKER_PIN, freq, SPEAKER_DURATION);
+#endif
 }
 
 void SFXcomplete(){
+#ifdef USE_SPEAKER
     //noToneAC();
     //noTone(SPEAKER_PIN);
+#endif
 }
+
+
+#ifdef USE_WIFI_JOYSTICK
+void checkSocketServer() {
+  if(!isConnected) {
+    client = serverSocket.available();
+    webSocketServer.handshake(client);
+    isConnected = true;
+    updateSocketClients();
+  }
+
+  if (client.connected()) {
+    const char * data;
+
+    // requires modifications to webSocketServer so it returns raw buffer instead of String.
+    data = webSocketServer.getData(true);
+    if (webSocketServer.getDataLength() > 0) {
+      joystickTilt = (int8_t) data[0];
+      joystickWobble = (int8_t) data[1] ? ATTACK_THRESHOLD : 0;
+      demo_simulation = false;
+    }
+  }
+  else {
+    isConnected = false;
+  }
+}
+
+void updateSocketClients() {
+  if (client.connected()) {
+    String data;
+    data = String(levelNumber) + "," + String(lives);
+    webSocketServer.sendData(data);
+  }
+}
+#endif

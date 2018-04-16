@@ -1,0 +1,171 @@
+<html>
+<head>
+<style>
+body {
+  text-align: center;
+  background: #000;
+  color: white;
+  font-family: monospace;
+  -webkit-animation-duration: 3s;
+  line-height: 25px;
+}
+#joy {
+  position:relative;
+  background: #333;
+  border-radius: 50px;
+  height: 50px;
+  transition: .1s;
+}
+#stick{
+  position:absolute;
+  height: 50px;
+  width: 50px;
+  background: #0F0;
+  border-radius: 50px
+}
+footer {
+  position: absolute;
+  bottom: 50px;
+  left: 0px;
+  width: 100%;
+}
+@-webkit-keyframes death {
+  0% {
+    background: #a00;
+  }
+  100% {
+    background: #000;
+  }
+}
+@-webkit-keyframes complete {
+  0% {
+    background: #0a5;
+  }
+  100% {
+    background: #000;
+  }
+}
+</style>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+<h1>PHONE TWANG!</h1>
+<p>Connect using any accelerometer enabled phone.</p>
+<p id="status">Please wait establishing a connection...</p>
+<div id="joy"><div id="stick"></div></div>
+<footer>
+Swap X and Y Axis <input type="checkbox" id="swap" /><br/>
+Reverse X Axis <input type="checkbox" id="reverse" />
+<p id="data">...</p>
+</footer>
+<script>
+  function run() {
+    var getElmById = function(id) {return document.getElementById(id)};
+    var joyElm = getElmById('joy');
+    var stickElm = getElmById('stick');
+    var statusElm = getElmById('status');
+    var dataElm = getElmById('data');
+    var swapElm = getElmById('swap');
+    var reverseElm = getElmById('reverse');
+
+    function constrain(val, min, max) {
+        val = parseFloat(val, 10);
+        return val > max ? max : val < min ? min : val;
+    }
+    var connection = new WebSocket('ws://'+window.location.host+':81');
+    //var connection = new WebSocket('ws://192.168.1.191:81');
+    var x = 0, y = 0;
+    var level = 0, lives = 0;
+    connection.onopen = function() {
+      // Log messages from the server
+      connection.onmessage = function (e) {
+        console.log('Received: ' + e.data);
+        var bdystyl = document.body.style;
+        setTimeout(function() {bdystyl.webkitAnimationName = ""}, 3000);
+        if(e.data[0] > level) {
+          // level completed
+          bdystyl.webkitAnimationName = "complete";
+          // vibrate on level completed
+          navigator.vibrate && navigator.vibrate(500);
+        }
+        if(e.data[2] < lives) {
+          // died
+          bdystyl.webkitAnimationName = "death";
+          // vibrate on death.
+          navigator.vibrate && navigator.vibrate([500, 100, 500]);
+        }
+        level = e.data[0]; // level
+        lives = e.data[2]; // lives
+        statusElm.textContent = "Level: "+level+", Lives: "+lives;
+      };
+
+      connection.onerror = function() {
+        connection.close();
+        window.location.reload();
+      }
+
+      connection.onclose = function() {
+        window.location.reload();
+      }
+
+      // listen for movement
+      window.addEventListener('deviceorientation', function(e) {
+        x = Math.abs(e.beta) > 10 ? -e.beta : 0;
+        y = Math.abs(e.gamma) > 30 ? e.gamma : 0;
+        if(swapElm.checked) {
+          var temp = x;
+          x = y;
+          y = temp;
+        }
+        if(reverseElm.checked) x = -x;
+      });
+
+      // watch keys
+      keyPress = function(e, press) {
+        switch(e.keyCode) {
+          case 37: // ArrowLeft
+            e.preventDefault();
+            x = press ? 90: 0;
+            break;
+          case 39: // ArrowRight
+            e.preventDefault();
+            x = press ? -90: 0;
+            break;
+          case 32: // Space
+            e.preventDefault();
+            y = press ? 90: 0;
+            break;
+        }
+        if(reverseElm.checked) x = -x;
+      };
+      document.onkeydown = function(e){keyPress(e, 1)};
+      document.onkeyup = function(e){keyPress(e, 0)};
+
+      setInterval( function() {
+        if(y) {
+          joyElm.style.background = "#05F";
+        } else {
+          joyElm.style.background = "";
+        }
+        stickElm.style.left = ((reverseElm.checked ? x : -x)*((joyElm.offsetWidth-50)/2/90)+(joyElm.offsetWidth/2-25));
+        dataElm.textContent = "x: "+x+", y: "+y;
+        sendPayload();
+      }, 16);
+    };
+
+    var lastMsg = "";
+    function sendPayload() {
+      var msg = new Int8Array(2);
+      msg[0] = constrain(x, -127,127);
+      msg[1] = constrain(y, -127,127);
+
+      //if(msg.toString() != lastMsg) {
+        lastMsg = msg.toString();
+        connection.send(msg);
+      //}
+    };
+  }
+  run();
+</script>
+</body>
+</html>
